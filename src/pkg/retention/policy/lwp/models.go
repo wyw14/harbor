@@ -33,6 +33,10 @@ type Metadata struct {
 
 	// Rule collection
 	Rules []*rule.Metadata `json:"rules"`
+
+	// MaxDeletionsPerRepository is the per-repository deletion protection
+	// threshold applied in this execution. nil means no threshold.
+	MaxDeletionsPerRepository *int `json:"max_deletions_per_repository,omitempty"`
 }
 
 // ToJSON marshals metadata to JSON string

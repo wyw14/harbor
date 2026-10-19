@@ -40,6 +40,7 @@ const (
 	actionMarkDeletion  = "DEL"
 	actionMarkError     = "ERR"
 	actionMarkImmutable = "IMMUTABLE"
+	actionMarkBlocked   = "BLOCKED"
 )
 
 // Job of running retention process
@@ -119,8 +120,16 @@ func (pj *Job) Run(ctx job.Context, params job.Parameters) error {
 		return logError(myLogger, err)
 	}
 
+	// check whether the repository is blocked by the max_deletions_per_repository protection
+	blocked := getBlockedResult(results)
+	if blocked != nil {
+		myLogger.Warningf("Repository %s is retained entirely in this round: %d artifact(s) selected for deletion exceeds the max_deletions_per_repository threshold %d",
+			repoPath, blocked.CandidateCount, blocked.Max)
+	}
+
 	// refreshQuota after the deleting candidates
-	if !isDryRun {
+	// a blocked repository deletes nothing, skip refreshing quota for it
+	if !isDryRun && blocked == nil {
 		if err = refreshQuota(ctx.SystemContext(), results); err != nil {
 			// just log error if refresh quota error
 			myLogger.Errorf("Refresh quota error after deleting candidates, error: %v", err)
@@ -131,10 +140,54 @@ func (pj *Job) Run(ctx job.Context, params job.Parameters) error {
 	logResults(myLogger, allCandidates, results)
 
 	// Save retain and total num in DB
-	return saveRetainNum(ctx, results, allCandidates, isDryRun)
+	if err = saveRetainNum(ctx, results, allCandidates, isDryRun, liteMeta.MaxDeletionsPerRepository, blocked); err != nil {
+		return logError(myLogger, err)
+	}
+
+	// a real run containing a blocked repository must not be reported as
+	// all succeed, make the task end with error status after the checkin is
+	// saved; dry-run keeps zero deletion and only reports the block.
+	if blocked != nil && !isDryRun {
+		return logError(myLogger, errors.Errorf("%s", blocked.Error()))
+	}
+
+	return nil
 }
 
-func saveRetainNum(ctx job.Context, results []*selector.Result, allCandidates []*selector.Candidate, isDryRun bool) error {
+// getBlockedResult returns the max deletions protection error if any of the
+// results is blocked in this round.
+func getBlockedResult(results []*selector.Result) *selector.MaxDeletionsExceededError {
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		if e, ok := r.Error.(*selector.MaxDeletionsExceededError); ok {
+			return e
+		}
+	}
+	return nil
+}
+
+// countDeletionCandidates counts the unique artifact digests selected for
+// deletion after the retain rules and immutable tag checks. Artifacts kept by
+// the rules are absent from results, and immutable-protected ones are excluded
+// by the ImmutableError mark.
+func countDeletionCandidates(results []*selector.Result) int {
+	digests := make(map[string]struct{})
+	for _, r := range results {
+		if r == nil || r.Target == nil {
+			continue
+		}
+		if _, ok := r.Error.(*selector.ImmutableError); ok {
+			continue
+		}
+		digests[r.Target.Digest] = struct{}{}
+	}
+	return len(digests)
+}
+
+func saveRetainNum(ctx job.Context, results []*selector.Result, allCandidates []*selector.Candidate,
+	isDryRun bool, maxDeletionsPerRepository *int, blocked *selector.MaxDeletionsExceededError) error {
 	var realDelete []*selector.Result
 	for _, r := range results {
 		if r.Error == nil {
@@ -142,15 +195,21 @@ func saveRetainNum(ctx job.Context, results []*selector.Result, allCandidates []
 		}
 	}
 	retainObj := struct {
-		Total    int                `json:"total"`
-		Retained int                `json:"retained"`
-		DryRun   bool               `json:"dry_run"`
-		Deleted  []*selector.Result `json:"deleted"`
+		Total                     int                `json:"total"`
+		Retained                  int                `json:"retained"`
+		DryRun                    bool               `json:"dry_run"`
+		Deleted                   []*selector.Result `json:"deleted"`
+		DeletionCandidates        int                `json:"deletion_candidates"`
+		MaxDeletionsPerRepository *int               `json:"max_deletions_per_repository,omitempty"`
+		DeletionBlocked           bool               `json:"deletion_blocked"`
 	}{
-		Total:    len(allCandidates),
-		Retained: len(allCandidates) - len(realDelete),
-		DryRun:   isDryRun,
-		Deleted:  realDelete,
+		Total:                     len(allCandidates),
+		Retained:                  len(allCandidates) - len(realDelete),
+		DryRun:                    isDryRun,
+		Deleted:                   realDelete,
+		DeletionCandidates:        countDeletionCandidates(results),
+		MaxDeletionsPerRepository: maxDeletionsPerRepository,
+		DeletionBlocked:           blocked != nil,
 	}
 	c, err := json.Marshal(retainObj)
 	if err != nil {
@@ -173,6 +232,9 @@ func logResults(logger logger.Interface, all []*selector.Candidate, results []*s
 			if e != nil {
 				if _, ok := e.(*selector.ImmutableError); ok {
 					return actionMarkImmutable
+				}
+				if _, ok := e.(*selector.MaxDeletionsExceededError); ok {
+					return actionMarkBlocked
 				}
 				return actionMarkError
 			}

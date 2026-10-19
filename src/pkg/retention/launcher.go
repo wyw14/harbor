@@ -177,7 +177,8 @@ func (l *launcher) Launch(ctx context.Context, ply *policy.Metadata, executionID
 			}
 			if repositoryRules[reposit] == nil {
 				repositoryRules[reposit] = &lwp.Metadata{
-					Algorithm: ply.Algorithm,
+					Algorithm:                 ply.Algorithm,
+					MaxDeletionsPerRepository: ply.MaxDeletionsPerRepository,
 				}
 			}
 			r := rule

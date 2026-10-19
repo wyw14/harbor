@@ -55,7 +55,7 @@ func (suite *IndexTestSuite) SetupSuite() {
 
 // TestRegister tests register
 func (suite *IndexTestSuite) TestGet() {
-	p, err := Get("fakeAction", nil, false)
+	p, err := Get("fakeAction", nil, false, nil)
 	require.NoError(suite.T(), err)
 	require.NotNil(suite.T(), p)
 
@@ -89,7 +89,7 @@ func (p *fakePerformer) Perform(ctx context.Context, candidates []*selector.Cand
 	return
 }
 
-func newFakePerformer(params any, isDryRun bool) action.Performer {
+func newFakePerformer(params any, isDryRun bool, maxDeletionsPerRepository *int) action.Performer {
 	return &fakePerformer{
 		parameters: params,
 		isDryRun:   isDryRun,

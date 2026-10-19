@@ -58,10 +58,21 @@ type Metadata struct {
 
 	// Which scope the policy will be applied to
 	Scope *Scope `json:"scope" valid:"Required"`
+
+	// MaxDeletionsPerRepository is the per-repository deletion protection
+	// threshold. When set, a repository is skipped entirely in a round if
+	// the number of the deletion candidates (unique artifact digests) is
+	// greater than the threshold. nil means no threshold; a zero value
+	// means only a repository without any deletion candidate can pass.
+	MaxDeletionsPerRepository *int `json:"max_deletions_per_repository,omitempty"`
 }
 
 // ValidateRetentionPolicy validate the retention policy
 func (m *Metadata) ValidateRetentionPolicy() error {
+	if m.MaxDeletionsPerRepository != nil && *m.MaxDeletionsPerRepository < 0 {
+		return errors.New(nil).WithCode(errors.BadRequestCode).
+			WithMessage("max_deletions_per_repository must be a non-negative integer")
+	}
 	// currently only validate the cron string of retention policy
 	if m.Trigger != nil {
 		if m.Trigger.Kind == TriggerKindSchedule && m.Trigger.Settings != nil {

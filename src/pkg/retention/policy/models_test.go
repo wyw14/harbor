@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/goharbor/harbor/src/lib/errors"
 	"github.com/goharbor/harbor/src/pkg/retention/policy/rule"
 )
 
@@ -75,6 +76,41 @@ func (p *PolicyTestSuite) TestValidateRetentionPolicy() {
 	// valid cron value
 	p.policy.Trigger.Settings = map[string]any{"cron": "0 0 0 1 1 *"}
 	p.NoError(p.policy.ValidateRetentionPolicy())
+}
+
+func TestValidateMaxDeletionsPerRepository(t *testing.T) {
+	newPolicy := func(max *int) *Metadata {
+		return &Metadata{
+			Algorithm:                 AlgorithmOR,
+			MaxDeletionsPerRepository: max,
+			Trigger: &Trigger{
+				Kind:     "Manual",
+				Settings: map[string]any{},
+			},
+			Scope: &Scope{
+				Level:     ScopeLevelProject,
+				Reference: 1,
+			},
+		}
+	}
+
+	// omitted means no threshold
+	require.NoError(t, newPolicy(nil).ValidateRetentionPolicy())
+
+	// zero is a valid threshold
+	require.NoError(t, newPolicy(ptrInt(0)).ValidateRetentionPolicy())
+
+	// positive threshold is valid
+	require.NoError(t, newPolicy(ptrInt(10)).ValidateRetentionPolicy())
+
+	// negative threshold is rejected with a bad request error
+	err := newPolicy(ptrInt(-1)).ValidateRetentionPolicy()
+	require.Error(t, err)
+	require.Equal(t, errors.BadRequestCode, errors.ErrCode(err))
+}
+
+func ptrInt(n int) *int {
+	return &n
 }
 
 func TestRule(t *testing.T) {

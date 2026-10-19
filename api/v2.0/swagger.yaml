@@ -8830,6 +8830,18 @@ definitions:
       scope:
         type: object
         $ref: '#/definitions/RetentionPolicyScope'
+      max_deletions_per_repository:
+        type: integer
+        format: int64
+        x-nullable: true
+        description: >-
+          The per-repository deletion protection threshold. After the retain rules and
+          immutable tag checks are applied, the artifacts (counted by unique artifact digest,
+          multiple tags of one artifact count as one) selected for deletion in each repository
+          are counted. If the count is greater than the threshold, no artifact of that repository
+          is deleted in this round; otherwise the original deletion flow proceeds. Omitted or
+          null means no threshold; an explicit zero means only a repository without any deletion
+          candidate can pass. Must be a non-negative integer.
 
   RetentionRuleTrigger:
     type: object
@@ -8940,6 +8952,19 @@ definitions:
       retained:
         type: integer
         x-omitempty: false
+      deletion_candidates:
+        type: integer
+        x-omitempty: false
+        description: The count of unique artifact digests selected for deletion after the retain rules and immutable tag checks in this round.
+      max_deletions_per_repository:
+        type: integer
+        format: int64
+        x-nullable: true
+        description: The per-repository deletion protection threshold applied in this round, null when no threshold is configured.
+      deletion_blocked:
+        type: boolean
+        x-omitempty: false
+        description: Whether the repository is retained entirely in this round because the deletion candidate count is greater than the threshold.
 
   QuotaUpdateReq:
     type: object

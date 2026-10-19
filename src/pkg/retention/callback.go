@@ -39,9 +39,12 @@ func retentionTaskCheckInProcessor(ctx context.Context, t *task.Task, sc *job.St
 	// handle checkin
 	if sc.CheckIn != "" {
 		var retainObj struct {
-			Total    int                `json:"total"`
-			Retained int                `json:"retained"`
-			Deleted  []*selector.Result `json:"deleted"`
+			Total                     int                `json:"total"`
+			Retained                  int                `json:"retained"`
+			Deleted                   []*selector.Result `json:"deleted"`
+			DeletionCandidates        int                `json:"deletion_candidates"`
+			MaxDeletionsPerRepository *int               `json:"max_deletions_per_repository,omitempty"`
+			DeletionBlocked           bool               `json:"deletion_blocked"`
 		}
 		if err := json.Unmarshal([]byte(sc.CheckIn), &retainObj); err != nil {
 			log.Errorf("failed to resolve checkin of retention task %d: %v", taskID, err)
@@ -56,6 +59,15 @@ func retentionTaskCheckInProcessor(ctx context.Context, t *task.Task, sc *job.St
 
 		t.ExtraAttrs["total"] = retainObj.Total
 		t.ExtraAttrs["retained"] = retainObj.Retained
+		t.ExtraAttrs["deletion_candidates"] = retainObj.DeletionCandidates
+		t.ExtraAttrs["deletion_blocked"] = retainObj.DeletionBlocked
+		// only record the threshold when it is configured, so absence keeps
+		// the same behavior as the old checkin data
+		if retainObj.MaxDeletionsPerRepository != nil {
+			t.ExtraAttrs["max_deletions_per_repository"] = *retainObj.MaxDeletionsPerRepository
+		} else {
+			delete(t.ExtraAttrs, "max_deletions_per_repository")
+		}
 
 		err = task.Mgr.UpdateExtraAttrs(ctx, taskID, t.ExtraAttrs)
 		if err != nil {

@@ -40,7 +40,7 @@ func Register(action string, factory action.PerformerFactory) {
 }
 
 // Get performer with the provided action
-func Get(act string, params any, isDryRun bool) (action.Performer, error) {
+func Get(act string, params any, isDryRun bool, maxDeletionsPerRepository *int) (action.Performer, error) {
 	if len(act) == 0 {
 		return nil, errors.New("empty action")
 	}
@@ -55,5 +55,5 @@ func Get(act string, params any, isDryRun bool) (action.Performer, error) {
 		return nil, errors.Errorf("invalid action performer registered for action %s", act)
 	}
 
-	return factory(params, isDryRun), nil
+	return factory(params, isDryRun, maxDeletionsPerRepository), nil
 }

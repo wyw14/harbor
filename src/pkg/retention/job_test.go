@@ -16,10 +16,12 @@ package retention
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -110,6 +112,122 @@ func (suite *JobTestSuite) TestRunSuccess() {
 	require.NoError(suite.T(), err)
 }
 
+// buildJobParams builds the job parameters with the latestPushedK=1 rule,
+// which selects 1 of the 2 fake candidates as the deletion candidate
+func (suite *JobTestSuite) buildJobParams(dryRun bool, threshold *int) job.Parameters {
+	params := make(job.Parameters)
+	params[ParamDryRun] = dryRun
+	repository := &selector.Repository{
+		Namespace: "library",
+		Name:      "harbor",
+		Kind:      selector.Image,
+	}
+	repoJSON, err := repository.ToJSON()
+	require.Nil(suite.T(), err)
+	params[ParamRepo] = repoJSON
+
+	ruleParams := make(rule.Parameters)
+	ruleParams[latestps.ParameterK] = 1
+
+	meta := &lwp.Metadata{
+		Algorithm: policy.AlgorithmOR,
+		Rules: []*rule.Metadata{
+			{
+				ID:       1,
+				Priority: 999,
+				Action:   action.Retain,
+				Template: latestps.TemplateID,
+				TagSelectors: []*rule.Selector{{
+					Kind:       doublestar.Kind,
+					Decoration: doublestar.Matches,
+					Pattern:    "**",
+				}},
+				Parameters: ruleParams,
+			},
+		},
+		MaxDeletionsPerRepository: threshold,
+	}
+	metaJSON, err := meta.ToJSON()
+	require.Nil(suite.T(), err)
+	params[ParamMeta] = metaJSON
+
+	return params
+}
+
+type checkinReport struct {
+	Total                     int     `json:"total"`
+	Retained                  int     `json:"retained"`
+	DryRun                    bool    `json:"dry_run"`
+	Deleted                   []any   `json:"deleted"`
+	DeletionCandidates        int     `json:"deletion_candidates"`
+	MaxDeletionsPerRepository *int    `json:"max_deletions_per_repository"`
+	DeletionBlocked           bool    `json:"deletion_blocked"`
+}
+
+// TestRunBlockedRealRun verifies a real run blocked by the protection
+// threshold deletes zero artifact, reports the block and ends with an error
+// so that the execution is not reported as all succeed.
+func (suite *JobTestSuite) TestRunBlockedRealRun() {
+	zero := 0
+	params := suite.buildJobParams(false, &zero)
+
+	j := &Job{}
+	require.NoError(suite.T(), j.Validate(params))
+
+	jobCtx := &fakeJobContext{}
+	err := j.Run(jobCtx, params)
+	require.Error(suite.T(), err)
+
+	report := &checkinReport{}
+	require.NoError(suite.T(), json.Unmarshal([]byte(jobCtx.checkin), report))
+	assert.True(suite.T(), report.DeletionBlocked)
+	assert.Equal(suite.T(), 1, report.DeletionCandidates)
+	require.NotNil(suite.T(), report.MaxDeletionsPerRepository)
+	assert.Equal(suite.T(), 0, *report.MaxDeletionsPerRepository)
+	assert.Empty(suite.T(), report.Deleted)
+	assert.Equal(suite.T(), 2, report.Retained)
+}
+
+// TestRunBlockedDryRun verifies a dry run uses the same block judgment,
+// reports the would-be block and keeps zero deletion without failing the job.
+func (suite *JobTestSuite) TestRunBlockedDryRun() {
+	zero := 0
+	params := suite.buildJobParams(true, &zero)
+
+	j := &Job{}
+	require.NoError(suite.T(), j.Validate(params))
+
+	jobCtx := &fakeJobContext{}
+	require.NoError(suite.T(), j.Run(jobCtx, params))
+
+	report := &checkinReport{}
+	require.NoError(suite.T(), json.Unmarshal([]byte(jobCtx.checkin), report))
+	assert.True(suite.T(), report.DeletionBlocked)
+	assert.Equal(suite.T(), 1, report.DeletionCandidates)
+	assert.Empty(suite.T(), report.Deleted)
+}
+
+// TestRunNotBlocked verifies the original deletion flow proceeds when the
+// candidate count is within the threshold.
+func (suite *JobTestSuite) TestRunNotBlocked() {
+	ten := 10
+	params := suite.buildJobParams(false, &ten)
+
+	j := &Job{}
+	require.NoError(suite.T(), j.Validate(params))
+
+	jobCtx := &fakeJobContext{}
+	require.NoError(suite.T(), j.Run(jobCtx, params))
+
+	report := &checkinReport{}
+	require.NoError(suite.T(), json.Unmarshal([]byte(jobCtx.checkin), report))
+	assert.False(suite.T(), report.DeletionBlocked)
+	assert.Equal(suite.T(), 1, report.DeletionCandidates)
+	require.NotNil(suite.T(), report.MaxDeletionsPerRepository)
+	assert.Equal(suite.T(), 10, *report.MaxDeletionsPerRepository)
+	assert.Len(suite.T(), report.Deleted, 1)
+}
+
 type fakeRetentionClient struct{}
 
 // GetCandidates ...
@@ -189,7 +307,9 @@ func (l *fakeLogger) Fatal(v ...any) {}
 // For fatal error with error
 func (l *fakeLogger) Fatalf(format string, v ...any) {}
 
-type fakeJobContext struct{}
+type fakeJobContext struct {
+	checkin string
+}
 
 func (c *fakeJobContext) Build(tracker job.Tracker) (job.Context, error) {
 	return nil, nil
@@ -205,6 +325,7 @@ func (c *fakeJobContext) SystemContext() context.Context {
 
 func (c *fakeJobContext) Checkin(status string) error {
 	fmt.Printf("Check in: %s\n", status)
+	c.checkin = status
 
 	return nil
 }

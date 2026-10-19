@@ -87,7 +87,7 @@ func (suite *ProcessorTestSuite) TearDownSuite() {
 // TestProcess tests process method
 func (suite *ProcessorTestSuite) TestProcess() {
 
-	perf := action.NewRetainAction(suite.all, false)
+	perf := action.NewRetainAction(suite.all, false, nil)
 
 	params := make([]*alg.Parameter, 0)
 	lastxParams := make(map[string]rule.Parameter)
@@ -129,7 +129,7 @@ func (suite *ProcessorTestSuite) TestProcess() {
 
 // TestProcess2 ...
 func (suite *ProcessorTestSuite) TestProcess2() {
-	perf := action.NewRetainAction(suite.all, false)
+	perf := action.NewRetainAction(suite.all, false, nil)
 
 	params := make([]*alg.Parameter, 0)
 	alwaysParams := make(map[string]rule.Parameter)

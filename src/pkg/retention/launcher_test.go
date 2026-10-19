@@ -25,11 +25,13 @@ import (
 	"github.com/goharbor/harbor/src/common/job"
 	"github.com/goharbor/harbor/src/lib/orm"
 	pq "github.com/goharbor/harbor/src/lib/q"
+	"github.com/goharbor/harbor/src/lib/selector"
 	_ "github.com/goharbor/harbor/src/lib/selector/selectors/doublestar"
 	"github.com/goharbor/harbor/src/pkg/project"
 	proModels "github.com/goharbor/harbor/src/pkg/project/models"
 	"github.com/goharbor/harbor/src/pkg/repository/model"
 	"github.com/goharbor/harbor/src/pkg/retention/policy"
+	"github.com/goharbor/harbor/src/pkg/retention/policy/lwp"
 	"github.com/goharbor/harbor/src/pkg/retention/policy/rule"
 	"github.com/goharbor/harbor/src/pkg/retention/q"
 	hjob "github.com/goharbor/harbor/src/testing/job"
@@ -281,6 +283,43 @@ func (l *launchTestSuite) TestStop() {
 
 	err = launcher.Stop(ctx, 1)
 	require.Nil(t, err)
+}
+
+func TestCreateJobsPropagatesThreshold(t *testing.T) {
+	threshold := 5
+	repo := selector.Repository{
+		NamespaceID: 1,
+		Namespace:   "library",
+		Name:        "image",
+		Kind:        selector.Image,
+	}
+	rules := map[selector.Repository]*lwp.Metadata{
+		repo: {
+			Algorithm:                 policy.AlgorithmOR,
+			MaxDeletionsPerRepository: &threshold,
+			Rules:                     []*rule.Metadata{{}},
+		},
+	}
+	jobs, err := createJobs(rules, true)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.True(t, jobs[0].JobParams[ParamDryRun].(bool))
+
+	lite := &lwp.Metadata{}
+	require.NoError(t, lite.FromJSON(jobs[0].JobParams[ParamMeta].(string)))
+	require.NotNil(t, lite.MaxDeletionsPerRepository)
+	assert.Equal(t, 5, *lite.MaxDeletionsPerRepository)
+
+	// omitted threshold stays nil and survives the job parameter round trip
+	rules[repo] = &lwp.Metadata{
+		Algorithm: policy.AlgorithmOR,
+		Rules:     []*rule.Metadata{{}},
+	}
+	jobs, err = createJobs(rules, false)
+	require.NoError(t, err)
+	lite = &lwp.Metadata{}
+	require.NoError(t, lite.FromJSON(jobs[0].JobParams[ParamMeta].(string)))
+	assert.Nil(t, lite.MaxDeletionsPerRepository)
 }
 
 func TestLaunchTestSuite(t *testing.T) {

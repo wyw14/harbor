@@ -20,7 +20,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/goharbor/harbor/src/common/dao"
@@ -415,4 +417,41 @@ func (f *fakeLauncher) Stop(ctx context.Context, executionID int64) error {
 
 func (f *fakeLauncher) Launch(ctx context.Context, policy *policy.Metadata, executionID int64, isDryRun bool) (int64, error) {
 	return 0, nil
+}
+
+func TestConvertTask(t *testing.T) {
+	// unconfigured threshold: fields default and threshold is omitted
+	rt := convertTask(&task.Task{
+		ID:     1,
+		Status: job.SuccessStatus.String(),
+		ExtraAttrs: map[string]any{
+			"repository":          "library/harbor",
+			"total":               float64(5),
+			"retained":            float64(3),
+			"deletion_candidates": float64(2),
+			"deletion_blocked":    false,
+		},
+	})
+	rq := require.New(t)
+	rq.Equal(2, rt.DeletionCandidates)
+	assert.False(t, rt.DeletionBlocked)
+	rq.Nil(rt.MaxDeletionsPerRepository)
+
+	// configured threshold including explicit zero and blocked flag
+	rt = convertTask(&task.Task{
+		ID:     2,
+		Status: job.ErrorStatus.String(),
+		ExtraAttrs: map[string]any{
+			"repository":                   "library/harbor",
+			"total":                        float64(11),
+			"retained":                     float64(11),
+			"deletion_candidates":          float64(11),
+			"deletion_blocked":             true,
+			"max_deletions_per_repository": float64(0),
+		},
+	})
+	rq.Equal(11, rt.DeletionCandidates)
+	assert.True(t, rt.DeletionBlocked)
+	rq.NotNil(rt.MaxDeletionsPerRepository)
+	assert.Equal(t, 0, *rt.MaxDeletionsPerRepository)
 }

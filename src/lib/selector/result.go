@@ -14,6 +14,8 @@
 
 package selector
 
+import "fmt"
+
 // Result keeps the action result
 type Result struct {
 	Target *Candidate `json:"target"`
@@ -27,4 +29,20 @@ type ImmutableError struct {
 
 func (e *ImmutableError) Error() string {
 	return "Immutable tag"
+}
+
+// MaxDeletionsExceededError indicates that the target is retained in this
+// round because the deletion candidate count of the repository is greater
+// than the max_deletions_per_repository protection threshold, so no
+// artifact of the repository is deleted.
+type MaxDeletionsExceededError struct {
+	// CandidateCount is the unique artifact digest count of the deletion
+	// candidates for the repository in this round
+	CandidateCount int
+	// Max is the applied max_deletions_per_repository threshold
+	Max int
+}
+
+func (e *MaxDeletionsExceededError) Error() string {
+	return fmt.Sprintf("deletion skipped: %d artifact(s) selected for deletion exceeds the max_deletions_per_repository threshold %d", e.CandidateCount, e.Max)
 }

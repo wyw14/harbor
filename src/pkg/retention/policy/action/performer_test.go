@@ -15,6 +15,7 @@
 package action
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -270,7 +271,154 @@ func (suite *TestPerformerSuite) TestPerformImmutableRepositoryExclusion() {
 	assert.IsType(suite.T(), (*selector.ImmutableError)(nil), results[1].Error)
 }
 
-type fakeRetentionClient struct{}
+// intPtr returns a pointer to the given int
+func intPtr(n int) *int {
+	return &n
+}
+
+// runWithCountingClient runs the retain action with a client recording the
+// deleted artifact digests
+func (suite *TestPerformerSuite) runWithCountingClient(threshold *int, isDryRun bool,
+	all, retained []*selector.Candidate) ([]*selector.Result, *fakeRetentionClient) {
+	frc := &fakeRetentionClient{}
+	old := dep.DefaultClient
+	dep.DefaultClient = frc
+	defer func() { dep.DefaultClient = old }()
+
+	p := &retainAction{
+		all:                       all,
+		isDryRun:                  isDryRun,
+		maxDeletionsPerRepository: threshold,
+	}
+	results, err := p.Perform(orm.Context(), retained)
+	require.NoError(suite.T(), err)
+	return results, frc
+}
+
+// blockTestCandidates builds n candidates with unique digests under a project
+// without any immutable rule
+func blockTestCandidates(n int) []*selector.Candidate {
+	all := make([]*selector.Candidate, 0, n)
+	for i := 0; i < n; i++ {
+		all = append(all, &selector.Candidate{
+			NamespaceID: 987654323,
+			Namespace:   "library",
+			Repository:  "harbor",
+			Kind:        selector.Image,
+			Tags:        []string{fmt.Sprintf("tag-%d", i)},
+			Digest:      fmt.Sprintf("digest-%d", i),
+			PushedTime:  time.Now().Unix(),
+		})
+	}
+	return all
+}
+
+// TestPerformBlockedByMaxDeletions verifies the whole repository is kept when
+// the deletion candidate count is greater than the threshold
+func (suite *TestPerformerSuite) TestPerformBlockedByMaxDeletions() {
+	all := blockTestCandidates(3)
+	// retain the first one, the other 2 are deletion candidates
+	results, frc := suite.runWithCountingClient(intPtr(1), false, all, all[:1])
+
+	require.Len(suite.T(), results, 2)
+	for _, r := range results {
+		blockedErr, ok := r.Error.(*selector.MaxDeletionsExceededError)
+		require.True(suite.T(), ok)
+		assert.Equal(suite.T(), 2, blockedErr.CandidateCount)
+		assert.Equal(suite.T(), 1, blockedErr.Max)
+	}
+	// zero artifact is deleted
+	assert.Empty(suite.T(), frc.deleted)
+}
+
+// TestPerformEqualThresholdProceeds verifies the deletion flow proceeds when
+// the deletion candidate count is equal to the threshold
+func (suite *TestPerformerSuite) TestPerformEqualThresholdProceeds() {
+	all := blockTestCandidates(3)
+	results, frc := suite.runWithCountingClient(intPtr(2), false, all, all[:1])
+
+	require.Len(suite.T(), results, 2)
+	for _, r := range results {
+		assert.NoError(suite.T(), r.Error)
+	}
+	assert.ElementsMatch(suite.T(), []string{"digest-1", "digest-2"}, frc.deleted)
+}
+
+// TestPerformZeroThreshold verifies threshold 0 blocks any deletion candidate
+// but allows a repository without deletion candidate to pass
+func (suite *TestPerformerSuite) TestPerformZeroThreshold() {
+	all := blockTestCandidates(2)
+
+	// one deletion candidate -> blocked, zero deletion
+	results, frc := suite.runWithCountingClient(intPtr(0), false, all, all[:1])
+	require.Len(suite.T(), results, 1)
+	_, ok := results[0].Error.(*selector.MaxDeletionsExceededError)
+	require.True(suite.T(), ok)
+	assert.Empty(suite.T(), frc.deleted)
+
+	// all artifacts retained -> no deletion candidate, the round proceeds
+	results, frc = suite.runWithCountingClient(intPtr(0), false, all, all)
+	assert.Empty(suite.T(), results)
+	assert.Empty(suite.T(), frc.deleted)
+}
+
+// TestPerformBlockedDryRun verifies dry-run reports the block and keeps zero
+// deletion
+func (suite *TestPerformerSuite) TestPerformBlockedDryRun() {
+	all := blockTestCandidates(2)
+	results, frc := suite.runWithCountingClient(intPtr(0), true, all, all[:1])
+
+	require.Len(suite.T(), results, 1)
+	_, ok := results[0].Error.(*selector.MaxDeletionsExceededError)
+	require.True(suite.T(), ok)
+	assert.Empty(suite.T(), frc.deleted)
+}
+
+// TestPerformBlockedCountUniqueDigests verifies candidates are counted by
+// unique artifact digest: multiple candidates with the same digest count once
+func (suite *TestPerformerSuite) TestPerformBlockedCountUniqueDigests() {
+	all := []*selector.Candidate{
+		{
+			NamespaceID: 987654324,
+			Namespace:   "library",
+			Repository:  "harbor",
+			Kind:        selector.Image,
+			Tags:        []string{"tag-a"},
+			Digest:      "shared-digest",
+			PushedTime:  time.Now().Unix(),
+		},
+		{
+			NamespaceID: 987654324,
+			Namespace:   "library",
+			Repository:  "harbor",
+			Kind:        selector.Image,
+			Tags:        []string{"tag-b"},
+			Digest:      "shared-digest",
+			PushedTime:  time.Now().Unix(),
+		},
+	}
+	// unique digest count is 1, threshold 1 -> 1 <= 1, the deletion proceeds
+	results, frc := suite.runWithCountingClient(intPtr(1), false, all, nil)
+	require.Len(suite.T(), results, 2)
+	for _, r := range results {
+		assert.NoError(suite.T(), r.Error)
+	}
+	assert.Equal(suite.T(), []string{"shared-digest", "shared-digest"}, frc.deleted)
+
+	// unique digest count is 1, threshold 0 -> 1 > 0, the repository is blocked
+	results, frc = suite.runWithCountingClient(intPtr(0), false, all, nil)
+	require.Len(suite.T(), results, 2)
+	for _, r := range results {
+		blockedErr, ok := r.Error.(*selector.MaxDeletionsExceededError)
+		require.True(suite.T(), ok)
+		assert.Equal(suite.T(), 1, blockedErr.CandidateCount)
+	}
+	assert.Empty(suite.T(), frc.deleted)
+}
+
+type fakeRetentionClient struct {
+	deleted []string
+}
 
 // GetCandidates ...
 func (frc *fakeRetentionClient) GetCandidates(repo *selector.Repository) ([]*selector.Candidate, error) {
@@ -279,6 +427,7 @@ func (frc *fakeRetentionClient) GetCandidates(repo *selector.Repository) ([]*sel
 
 // Delete ...
 func (frc *fakeRetentionClient) Delete(candidate *selector.Candidate) error {
+	frc.deleted = append(frc.deleted, candidate.Digest)
 	return nil
 }
 

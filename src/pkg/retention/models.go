@@ -55,6 +55,15 @@ type Task struct {
 	EndTime        time.Time `json:"end_time"`
 	Total          int       `json:"total"`
 	Retained       int       `json:"retained"`
+	// DeletionCandidates is the count of unique artifact digests selected
+	// for deletion after the retain rules and immutable tag checks
+	DeletionCandidates int `json:"deletion_candidates"`
+	// MaxDeletionsPerRepository is the applied per-repository deletion
+	// protection threshold, nil means no threshold configured
+	MaxDeletionsPerRepository *int `json:"max_deletions_per_repository,omitempty"`
+	// DeletionBlocked indicates the repository is retained entirely in this
+	// round because DeletionCandidates is greater than the threshold
+	DeletionBlocked bool `json:"deletion_blocked"`
 }
 
 // History of retention

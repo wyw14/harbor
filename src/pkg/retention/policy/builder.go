@@ -67,7 +67,7 @@ func (bb *basicBuilder) Build(policy *lwp.Metadata, isDryRun bool) (alg.Processo
 			return nil, err
 		}
 
-		perf, err := index4.Get(r.Action, bb.allCandidates, isDryRun)
+		perf, err := index4.Get(r.Action, bb.allCandidates, isDryRun, policy.MaxDeletionsPerRepository)
 		if err != nil {
 			return nil, errors.Wrap(err, "get action performer by metadata")
 		}

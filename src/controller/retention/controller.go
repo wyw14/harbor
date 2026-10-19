@@ -383,18 +383,29 @@ func (r *defaultController) ListRetentionExecTasks(ctx context.Context, executio
 }
 
 func convertTask(t *task.Task) *retention.Task {
-	return &retention.Task{
-		ID:          t.ID,
-		ExecutionID: t.ExecutionID,
-		Repository:  t.GetStringFromExtraAttrs("repository"),
-		JobID:       t.JobID,
-		Status:      t.Status,
-		StatusCode:  job.Status(t.Status).Code(),
-		StartTime:   t.StartTime,
-		EndTime:     t.EndTime,
-		Total:       int(t.GetNumFromExtraAttrs("total")),
-		Retained:    int(t.GetNumFromExtraAttrs("retained")),
+	retentionTask := &retention.Task{
+		ID:                 t.ID,
+		ExecutionID:        t.ExecutionID,
+		Repository:         t.GetStringFromExtraAttrs("repository"),
+		JobID:              t.JobID,
+		Status:             t.Status,
+		StatusCode:         job.Status(t.Status).Code(),
+		StartTime:          t.StartTime,
+		EndTime:            t.EndTime,
+		Total:              int(t.GetNumFromExtraAttrs("total")),
+		Retained:           int(t.GetNumFromExtraAttrs("retained")),
+		DeletionCandidates: int(t.GetNumFromExtraAttrs("deletion_candidates")),
+		DeletionBlocked:    t.GetBoolFromExtraAttrs("deletion_blocked"),
 	}
+	// only expose the threshold when it is configured for the execution
+	if v, ok := t.ExtraAttrs["max_deletions_per_repository"]; ok {
+		n := t.GetInt64FromExtraAttrs("max_deletions_per_repository")
+		if _, isNum := task.Int64FromAny(v); isNum {
+			threshold := int(n)
+			retentionTask.MaxDeletionsPerRepository = &threshold
+		}
+	}
+	return retentionTask
 }
 
 // GetTotalOfRetentionExecTasks Count Retention Execution Histories
