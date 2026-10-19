@@ -45,6 +45,10 @@ var (
 )
 
 func init() {
+	// register the read-only scan summary lookup with the artifact controller,
+	// which cannot import this package directly because of the import cycle
+	artifact.RegisterScanSummaryProvider(DefaultController)
+
 	if err := scheduler.RegisterCallbackFunc(ScanAllCallback, scanAllCallback); err != nil {
 		log.Fatalf("failed to register the callback for the scan all schedule, error %v", err)
 	}

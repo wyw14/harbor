@@ -7,6 +7,8 @@ import (
 
 	artifact "github.com/goharbor/harbor/src/controller/artifact"
 
+	pkgartifact "github.com/goharbor/harbor/src/pkg/artifact"
+
 	mock "github.com/stretchr/testify/mock"
 
 	processor "github.com/goharbor/harbor/src/controller/artifact/processor"
@@ -111,6 +113,36 @@ func (_m *Controller) Delete(ctx context.Context, id int64) error {
 	}
 
 	return r0
+}
+
+// Diff provides a mock function with given fields: ctx, left, right, option, query
+func (_m *Controller) Diff(ctx context.Context, left *artifact.DiffTarget, right *artifact.DiffTarget, option *artifact.DiffOption, query *q.Query) (*pkgartifact.DiffResult, error) {
+	ret := _m.Called(ctx, left, right, option, query)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Diff")
+	}
+
+	var r0 *pkgartifact.DiffResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *artifact.DiffTarget, *artifact.DiffTarget, *artifact.DiffOption, *q.Query) (*pkgartifact.DiffResult, error)); ok {
+		return rf(ctx, left, right, option, query)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *artifact.DiffTarget, *artifact.DiffTarget, *artifact.DiffOption, *q.Query) *pkgartifact.DiffResult); ok {
+		r0 = rf(ctx, left, right, option, query)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*pkgartifact.DiffResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *artifact.DiffTarget, *artifact.DiffTarget, *artifact.DiffOption, *q.Query) error); ok {
+		r1 = rf(ctx, left, right, option, query)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // Ensure provides a mock function with given fields: ctx, repository, digest, option

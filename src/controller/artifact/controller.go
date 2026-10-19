@@ -124,6 +124,12 @@ type Controller interface {
 	HasUnscannableLayer(ctx context.Context, dgst string) (bool, error)
 	// ListWithLatest list the artifacts when the latest_in_repository in the query was set
 	ListWithLatest(ctx context.Context, query *q.Query, option *Option) (artifacts []*Artifact, err error)
+	// Diff compares the read-only metadata (tags, platforms, signature references,
+	// scan summaries and creation time) of two artifacts identified by repository
+	// and digest. It never triggers a scan or modifies tags and marks sub-manifests
+	// an index declares but a side cannot serve. Read permission on both projects
+	// is required.
+	Diff(ctx context.Context, left, right *DiffTarget, option *DiffOption, query *q.Query) (result *artifact.DiffResult, err error)
 }
 
 // NewController creates an instance of the default artifact controller
